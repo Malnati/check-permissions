@@ -1,0 +1,149 @@
+name: "check-permissions"
+description: "Coleta configurações de merge e proteção de branch, gera checklist e comenta na PR."
+
+inputs:
+  token:
+    description: "GitHub token (ex.: secrets.GITHUB_TOKEN)"
+    required: true
+  base_branch:
+    description: "Nome do branch base a ser verificado (ex.: main, staging)"
+    required: true
+  pr_number:
+    description: "Número da Pull Request a ser comentada"
+    required: true
+
+outputs:
+  message_checklist:
+    description: "Checklist em Markdown com configurações de merge e proteção do branch base."
+    value: ${{ steps.build-checklist.outputs.message_checklist }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: fetch-permissions
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+      run: |
+        set -euo pipefail
+
+        GITHUB_API_URL="https://api.github.com"
+
+        REPO_RESPONSE="$(curl -sS \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY")"
+
+        TMP_PROTECTION="$(mktemp)"
+
+        BRANCH_PROT_STATUS="$(curl -sS \
+          -o "$TMP_PROTECTION" \
+          -w '%{http_code}' \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/$BASE_BRANCH/protection")"
+
+        PROTECTION_RESPONSE="$(cat "$TMP_PROTECTION" || echo '')"
+        rm -f "$TMP_PROTECTION" || true
+
+        {
+          printf 'repo_json<<EOF\n%s\nEOF\n' "$REPO_RESPONSE"
+          printf 'protection_json<<EOF\n%s\nEOF\n' "$PROTECTION_RESPONSE"
+          echo "branch_prot_status=$BRANCH_PROT_STATUS"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: build-checklist
+      shell: bash
+      env:
+        REPO_JSON: ${{ steps.fetch-permissions.outputs.repo_json }}
+        PROTECTION_JSON: ${{ steps.fetch-permissions.outputs.protection_json }}
+        BRANCH_PROT_STATUS: ${{ steps.fetch-permissions.outputs.branch_prot_status }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        emoji() {
+          case "$1" in
+            true) printf '✅' ;;
+            false) printf '❌' ;;
+            null|'') printf '❔' ;;
+            *) printf '❌' ;;
+          esac
+        }
+
+        ALLOW_REBASE="$(printf '%s' "$REPO_JSON" | jq -r '.allow_rebase_merge')"
+        ALLOW_SQUASH="$(printf '%s' "$REPO_JSON" | jq -r '.allow_squash_merge')"
+        ALLOW_MERGE_COMMIT="$(printf '%s' "$REPO_JSON" | jq -r '.allow_merge_commit')"
+        ALLOW_AUTO_MERGE="$(printf '%s' "$REPO_JSON" | jq -r '.allow_auto_merge')"
+        DELETE_BRANCH_ON_MERGE="$(printf '%s' "$REPO_JSON" | jq -r '.delete_branch_on_merge')"
+        DEFAULT_BRANCH="$(printf '%s' "$REPO_JSON" | jq -r '.default_branch // ""')"
+
+        ALLOW_REBASE_EMOJI="$(emoji "$ALLOW_REBASE")"
+        ALLOW_SQUASH_EMOJI="$(emoji "$ALLOW_SQUASH")"
+        ALLOW_MERGE_COMMIT_EMOJI="$(emoji "$ALLOW_MERGE_COMMIT")"
+        ALLOW_AUTO_MERGE_EMOJI="$(emoji "$ALLOW_AUTO_MERGE")"
+        DELETE_BRANCH_ON_MERGE_EMOJI="$(emoji "$DELETE_BRANCH_ON_MERGE")"
+
+        if [ "$BRANCH_PROT_STATUS" = "200" ]; then
+          LINEAR_HISTORY="$(printf '%s' "$PROTECTION_JSON" | jq -r '.required_linear_history.enabled // .required_linear_history // empty')"
+          REQUIRED_STATUS_CHECKS_PRESENT="$(printf '%s' "$PROTECTION_JSON" | jq -r 'if .required_status_checks and ((.required_status_checks.checks // []) + (.required_status_checks.contexts // []) | length) > 0 then "true" else "false" end')"
+          STRICT_STATUS="$(printf '%s' "$PROTECTION_JSON" | jq -r '.required_status_checks.strict // empty')"
+          REQUIRED_APPROVING="$(printf '%s' "$PROTECTION_JSON" | jq -r '.required_pull_request_reviews.required_approving_review_count // empty')"
+          ENFORCE_ADMINS="$(printf '%s' "$PROTECTION_JSON" | jq -r '.enforce_admins.enabled // .enforce_admins // empty')"
+          RESTRICTIONS_PRESENT="$(printf '%s' "$PROTECTION_JSON" | jq -r 'if .restrictions and (((.restrictions.users // []) + (.restrictions.teams // []) + (.restrictions.apps // []) | length) > 0) then "true" else "false" end')"
+
+          LINEAR_HISTORY_EMOJI="$(emoji "$LINEAR_HISTORY")"
+          REQUIRED_STATUS_EMOJI="$(emoji "$REQUIRED_STATUS_CHECKS_PRESENT")"
+          STRICT_STATUS_EMOJI="$(emoji "$STRICT_STATUS")"
+          ENFORCE_ADMINS_EMOJI="$(emoji "$ENFORCE_ADMINS")"
+          RESTRICTIONS_EMOJI="$(emoji "$RESTRICTIONS_PRESENT")"
+
+          if [ -z "$REQUIRED_APPROVING" ] || [ "$REQUIRED_APPROVING" = "null" ]; then
+            REQUIRED_APPROVING="0"
+          fi
+
+          PROTECTION_SECTION="**Proteção do branch base \`$BASE_BRANCH\`:**
+- Histórico linear obrigatório: $LINEAR_HISTORY_EMOJI
+- Status checks obrigatórios: $REQUIRED_STATUS_EMOJI"
+          if [ "$REQUIRED_STATUS_CHECKS_PRESENT" = "true" ] || [ "$STRICT_STATUS" = "true" ] || [ "$STRICT_STATUS" = "false" ]; then
+            PROTECTION_SECTION="$PROTECTION_SECTION
+  - Exigir branch atualizado para merge: $STRICT_STATUS_EMOJI"
+          fi
+          PROTECTION_SECTION="$PROTECTION_SECTION
+- Reviews obrigatórios: $REQUIRED_APPROVING aprovação(ões)
+- Regras válidas também para admins: $ENFORCE_ADMINS_EMOJI
+- Restrição de quem pode pushar: $RESTRICTIONS_EMOJI"
+        else
+          PROTECTION_SECTION="⚠️ Não foi possível ler a proteção do branch \`$BASE_BRANCH\` (status HTTP $BRANCH_PROT_STATUS)."
+        fi
+
+        export ALLOW_REBASE_EMOJI
+        export ALLOW_SQUASH_EMOJI
+        export ALLOW_MERGE_COMMIT_EMOJI
+        export ALLOW_AUTO_MERGE_EMOJI
+        export DELETE_BRANCH_ON_MERGE_EMOJI
+        export DEFAULT_BRANCH
+        export PROTECTION_SECTION
+
+        CHECKLIST_MSG="$(envsubst < "$GITHUB_ACTION_PATH/templates/checklist.md")"
+
+        {
+          printf 'message_checklist<<EOF\n%s\nEOF\n' "$CHECKLIST_MSG"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: comment-checklist
+      uses: Malnati/pr-comment@v1
+      with:
+        token: ${{ inputs.token }}
+        pr_number: ${{ inputs.pr_number }}
+        header_actor: ${{ github.actor }}
+        header_title: "📋 Checklist de proteção de branch"
+        header_subject: Regras aplicadas ao branch base ${{ inputs.base_branch }}
+        body_message: ${{ steps.build-checklist.outputs.message_checklist }}
+        body_scope: ""
+        body_todo: ""
+        footer_result: "Checklist gerada automaticamente."
+        footer_advise: "Revise as regras antes de ajustar a estratégia de merge."
