@@ -1,4 +1,3 @@
-# action.yml
 name: "Check Branch Permissions"
 description: "Collect branch protection and merge settings and post a Markdown checklist on the Pull Request."
 author: "Ricardo Malnati"
