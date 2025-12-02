@@ -9,4 +9,12 @@
 - Deletar branch no merge: $DELETE_BRANCH_ON_MERGE_EMOJI
 - Branch padrão do repositório: `$DEFAULT_BRANCH`
 
-$PROTECTION_SECTION
+$PROTECTION_NOTE
+
+**Proteção do branch base \`$BASE_BRANCH\`:**
+- Histórico linear obrigatório: $LINEAR_HISTORY_EMOJI
+- Status checks obrigatórios: $REQUIRED_STATUS_EMOJI
+$STRICT_LINE
+- Reviews obrigatórios: $REQUIRED_APPROVING aprovação(ões)
+- Regras válidas também para admins: $ENFORCE_ADMINS_EMOJI
+- Restrição de quem pode pushar: $RESTRICTIONS_EMOJI

@@ -1,4 +1,4 @@
-# action.yml
+# .github/actions/check-permissions/action.yml
 name: "Check Branch Permissions"
 description: "Collect branch protection and merge settings and post a Markdown checklist on the Pull Request."
 author: "Ricardo Malnati"
@@ -120,6 +120,14 @@ runs:
           esac
         }
 
+        PROTECTION_NOTE=""
+        LINEAR_HISTORY_EMOJI="❔"
+        REQUIRED_STATUS_EMOJI="❔"
+        STRICT_LINE=""
+        REQUIRED_APPROVING="0"
+        ENFORCE_ADMINS_EMOJI="❔"
+        RESTRICTIONS_EMOJI="❔"
+
         if [ "$BRANCH_PROT_STATUS" = "200" ]; then
           LINEAR_HISTORY="$(printf '%s' "$PROTECTION_JSON" | jq -r '.required_linear_history.enabled // .required_linear_history // empty')"
           REQUIRED_STATUS_CHECKS_PRESENT="$(printf '%s' "$PROTECTION_JSON" | jq -r 'if .required_status_checks and ((.required_status_checks.checks // []) + (.required_status_checks.contexts // []) | length) > 0 then "true" else "false" end')"
@@ -138,39 +146,42 @@ runs:
             REQUIRED_APPROVING="0"
           fi
 
-          STRICT_LINE=""
           if [ "$REQUIRED_STATUS_CHECKS_PRESENT" = "true" ] || [ "$STRICT_STATUS" = "true" ] || [ "$STRICT_STATUS" = "false" ]; then
-            STRICT_LINE="  - Exigir branch atualizado para merge: $STRICT_STATUS_EMOJI"
+            STRICT_LINE="- Exigir branch atualizado para merge: $STRICT_STATUS_EMOJI"
           fi
-
-          PROTECTION_SECTION="**Proteção do branch base \`$BASE_BRANCH\`:**"
-          PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"- Histórico linear obrigatório: $LINEAR_HISTORY_EMOJI"
-          PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"- Status checks obrigatórios: $REQUIRED_STATUS_EMOJI"
-          if [ -n "$STRICT_LINE" ]; then
-            PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"$STRICT_LINE"
-          fi
-          PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"- Reviews obrigatórios: $REQUIRED_APPROVING aprovação(ões)"
-          PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"- Regras válidas também para admins: $ENFORCE_ADMINS_EMOJI"
-          PROTECTION_SECTION="$PROTECTION_SECTION"$'\n'"- Restrição de quem pode pushar: $RESTRICTIONS_EMOJI"
         else
-          PROTECTION_SECTION="⚠️ Não foi possível ler a proteção do branch \`$BASE_BRANCH\` (status HTTP $BRANCH_PROT_STATUS)."
+          PROTECTION_NOTE="⚠️ Não foi possível ler a proteção do branch \`$BASE_BRANCH\` (status HTTP $BRANCH_PROT_STATUS)."
+          STRICT_LINE="- Não foi possível ler configurações detalhadas (HTTP $BRANCH_PROT_STATUS)"
         fi
 
         {
-          printf 'protection_section<<EOF\n%s\nEOF\n' "$PROTECTION_SECTION"
+          echo "protection_note=$PROTECTION_NOTE"
+          echo "linear_history_emoji=$LINEAR_HISTORY_EMOJI"
+          echo "required_status_emoji=$REQUIRED_STATUS_EMOJI"
+          echo "strict_line=$STRICT_LINE"
+          echo "required_approving=$REQUIRED_APPROVING"
+          echo "enforce_admins_emoji=$ENFORCE_ADMINS_EMOJI"
+          echo "restrictions_emoji=$RESTRICTIONS_EMOJI"
         } >>"$GITHUB_OUTPUT"
 
     - id: build-checklist
       shell: bash
       env:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
         ALLOW_REBASE_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_rebase_emoji }}
         ALLOW_SQUASH_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_squash_emoji }}
         ALLOW_MERGE_COMMIT_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_merge_commit_emoji }}
         ALLOW_AUTO_MERGE_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_auto_merge_emoji }}
         DELETE_BRANCH_ON_MERGE_EMOJI: ${{ steps.compute-merge-settings.outputs.delete_branch_on_merge_emoji }}
         DEFAULT_BRANCH: ${{ steps.compute-merge-settings.outputs.default_branch }}
-        PROTECTION_SECTION: ${{ steps.compute-protection-section.outputs.protection_section }}
+        PROTECTION_NOTE: ${{ steps.compute-protection-section.outputs.protection_note }}
+        LINEAR_HISTORY_EMOJI: ${{ steps.compute-protection-section.outputs.linear_history_emoji }}
+        REQUIRED_STATUS_EMOJI: ${{ steps.compute-protection-section.outputs.required_status_emoji }}
+        STRICT_LINE: ${{ steps.compute-protection-section.outputs.strict_line }}
+        REQUIRED_APPROVING: ${{ steps.compute-protection-section.outputs.required_approving }}
+        ENFORCE_ADMINS_EMOJI: ${{ steps.compute-protection-section.outputs.enforce_admins_emoji }}
+        RESTRICTIONS_EMOJI: ${{ steps.compute-protection-section.outputs.restrictions_emoji }}
       run: |
         set -euo pipefail
         CHECKLIST_MSG="$(envsubst < "$GITHUB_ACTION_PATH/template.md")"
