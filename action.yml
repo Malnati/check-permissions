@@ -1,5 +1,11 @@
-name: "check-permissions"
-description: "Coleta configurações de merge e proteção de branch, gera checklist e comenta na PR."
+# action.yml
+name: "Check Branch Permissions"
+description: "Collect branch protection and merge settings and post a Markdown checklist on the Pull Request."
+author: "Ricardo Malnati"
+
+branding:
+  icon: "shield"
+  color: "blue"
 
 inputs:
   token:
@@ -135,7 +141,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - id: comment-checklist
-      uses: Malnati/pr-comment@v1
+      uses: Malnati/pr-comment@v4
       with:
         token: ${{ inputs.token }}
         pr_number: ${{ inputs.pr_number }}
