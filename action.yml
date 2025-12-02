@@ -133,7 +133,7 @@ runs:
         export DEFAULT_BRANCH
         export PROTECTION_SECTION
 
-        CHECKLIST_MSG="$(envsubst < "$GITHUB_ACTION_PATH/checklist.md")"
+        CHECKLIST_MSG="$(envsubst < "$GITHUB_ACTION_PATH/template.md")"
 
         {
           printf 'message_checklist<<EOF\n%s\nEOF\n' "$CHECKLIST_MSG"
