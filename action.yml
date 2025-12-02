@@ -64,14 +64,10 @@ runs:
           echo "branch_prot_status=$STATUS"
         } >>"$GITHUB_OUTPUT"
 
-    - id: build-checklist
+    - id: compute-merge-settings
       shell: bash
       env:
         REPO_JSON: ${{ steps.fetch-repo.outputs.repo_json }}
-        PROTECTION_JSON: ${{ steps.fetch-protection.outputs.protection_json }}
-        BRANCH_PROT_STATUS: ${{ steps.fetch-protection.outputs.branch_prot_status }}
-        BASE_BRANCH: ${{ inputs.base_branch }}
-        GITHUB_ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
 
@@ -97,7 +93,33 @@ runs:
         ALLOW_AUTO_MERGE_EMOJI="$(emoji "$ALLOW_AUTO_MERGE")"
         DELETE_BRANCH_ON_MERGE_EMOJI="$(emoji "$DELETE_BRANCH_ON_MERGE")"
 
-        PROTECTION_SECTION=""
+        {
+          echo "allow_rebase_emoji=$ALLOW_REBASE_EMOJI"
+          echo "allow_squash_emoji=$ALLOW_SQUASH_EMOJI"
+          echo "allow_merge_commit_emoji=$ALLOW_MERGE_COMMIT_EMOJI"
+          echo "allow_auto_merge_emoji=$ALLOW_AUTO_MERGE_EMOJI"
+          echo "delete_branch_on_merge_emoji=$DELETE_BRANCH_ON_MERGE_EMOJI"
+          echo "default_branch=$DEFAULT_BRANCH"
+        } >>"$GITHUB_OUTPUT"
+
+    - id: compute-protection-section
+      shell: bash
+      env:
+        PROTECTION_JSON: ${{ steps.fetch-protection.outputs.protection_json }}
+        BRANCH_PROT_STATUS: ${{ steps.fetch-protection.outputs.branch_prot_status }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+      run: |
+        set -euo pipefail
+
+        emoji() {
+          case "$1" in
+            true) printf '✅' ;;
+            false) printf '❌' ;;
+            null|'') printf '❔' ;;
+            *) printf '❌' ;;
+          esac
+        }
+
         if [ "$BRANCH_PROT_STATUS" = "200" ]; then
           LINEAR_HISTORY="$(printf '%s' "$PROTECTION_JSON" | jq -r '.required_linear_history.enabled // .required_linear_history // empty')"
           REQUIRED_STATUS_CHECKS_PRESENT="$(printf '%s' "$PROTECTION_JSON" | jq -r 'if .required_status_checks and ((.required_status_checks.checks // []) + (.required_status_checks.contexts // []) | length) > 0 then "true" else "false" end')"
@@ -135,16 +157,24 @@ EOF
           PROTECTION_SECTION="⚠️ Não foi possível ler a proteção do branch \`$BASE_BRANCH\` (status HTTP $BRANCH_PROT_STATUS)."
         fi
 
-        export ALLOW_REBASE_EMOJI
-        export ALLOW_SQUASH_EMOJI
-        export ALLOW_MERGE_COMMIT_EMOJI
-        export ALLOW_AUTO_MERGE_EMOJI
-        export DELETE_BRANCH_ON_MERGE_EMOJI
-        export DEFAULT_BRANCH
-        export PROTECTION_SECTION
+        {
+          printf 'protection_section<<EOF\n%s\nEOF\n' "$PROTECTION_SECTION"
+        } >>"$GITHUB_OUTPUT"
 
+    - id: build-checklist
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        ALLOW_REBASE_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_rebase_emoji }}
+        ALLOW_SQUASH_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_squash_emoji }}
+        ALLOW_MERGE_COMMIT_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_merge_commit_emoji }}
+        ALLOW_AUTO_MERGE_EMOJI: ${{ steps.compute-merge-settings.outputs.allow_auto_merge_emoji }}
+        DELETE_BRANCH_ON_MERGE_EMOJI: ${{ steps.compute-merge-settings.outputs.delete_branch_on_merge_emoji }}
+        DEFAULT_BRANCH: ${{ steps.compute-merge-settings.outputs.default_branch }}
+        PROTECTION_SECTION: ${{ steps.compute-protection-section.outputs.protection_section }}
+      run: |
+        set -euo pipefail
         CHECKLIST_MSG="$(envsubst < "$GITHUB_ACTION_PATH/template.md")"
-
         {
           printf 'message_checklist<<EOF\n%s\nEOF\n' "$CHECKLIST_MSG"
         } >>"$GITHUB_OUTPUT"
