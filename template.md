@@ -1,4 +1,4 @@
-<!-- templates/checklist.md -->
+<!-- template.md -->
 📋 Lista de checagem de merge e proteção de branch:
 
 **Configuração de merge do repositório:**
